@@ -1,0 +1,101 @@
+#!/usr/bin/env bpftrace
+/*
+ * ebpf_probes.bt — O1 eBPF Measurement Probes (bpftrace v0.14 compatible)
+ * Akhil's 5G UPF Research Platform | MNNIT Allahabad
+ *
+ * Measurement architecture (revised):
+ *
+ *   M1: sys_enter_recvfrom on GTP-U socket (fd 8, port 2152) per UPF process
+ *       → packet arrives from gNB, still GTP-U encapsulated
+ *       → tagged with pid → slice via PID_SLICE map
+ *
+ *   M2: sys_enter_sendto / sys_exit_recvfrom on SMF/UPF processes
+ *       → N4 PFCP session latency (unchanged)
+ *
+ *   M3: sys_enter_write on /dev/net/tun fd per UPF process
+ *       → decapsulated IP packet written to ogstun (true N6 point)
+ *       → tagged with pid → slice via PID_SLICE map
+ *
+ * Why process-level probes instead of netif_receive_skb:
+ *   netif_receive_skb fires host-wide; all container eth0 interfaces have
+ *   the same name and cannot be distinguished. UPF process syscall probes
+ *   are per-PID and give exact per-slice attribution.
+ *
+ * PID_SLICE map — update host PIDs at experiment start via run_experiment.sh:
+ *   UPF1 (eMBB):  host PID written to /tmp/upf1_pid by run_experiment.sh
+ *   UPF2 (URLLC): host PID written to /tmp/upf2_pid
+ *   UPF3 (mMTC):  host PID written to /tmp/upf3_pid
+ *
+ * GTP-U fd and TUN fd are identified at probe attach time by run_experiment.sh
+ * and passed as environment variables:
+ *   UPF1_GTPU_FD, UPF2_GTPU_FD, UPF3_GTPU_FD  (recvfrom fd for GTP-U)
+ *   UPF1_TUN_FD,  UPF2_TUN_FD,  UPF3_TUN_FD   (write fd for ogstun)
+ */
+
+/* M1 — N3 ingress: GTP-U packet received by UPF process */
+tracepoint:syscalls:sys_enter_recvfrom
+/pid == $UPF1_PID || pid == $UPF2_PID || pid == $UPF3_PID/
+{
+    $slice = pid == $UPF1_PID ? "eMBB" :
+             pid == $UPF2_PID ? "URLLC" : "mMTC";
+    @m1_start[tid] = nsecs;
+    @m1_pid[tid]   = pid;
+    @m1_slice[tid] = $slice;
+}
+
+tracepoint:syscalls:sys_exit_recvfrom
+/pid == $UPF1_PID || pid == $UPF2_PID || pid == $UPF3_PID/
+/args->ret > 28/
+{
+    if (@m1_start[tid] != 0) {
+        $slice = @m1_slice[tid];
+        printf("{\"type\":\"m1_n3_rx\",\"ts_ns\":%llu,\"cpu\":%d,\"len\":%d,\"netif\":\"%s\",\"pid\":%d}\n",
+               @m1_start[tid], cpu, (int32)args->ret, $slice, pid);
+        delete(@m1_start[tid]);
+        delete(@m1_pid[tid]);
+        delete(@m1_slice[tid]);
+    }
+}
+
+/* M2 — N4 PFCP send (unchanged) */
+tracepoint:syscalls:sys_enter_sendto
+/comm == "open5gs-smfd" || comm == "open5gs-upfd"/
+{
+    printf("{\"type\":\"m2_pfcp_send\",\"ts_ns\":%llu,\"pid\":%d,\"tid\":%d,\"comm\":\"%s\"}\n",
+           nsecs, pid, tid, comm);
+}
+
+/* M2 — N4 PFCP recv (unchanged) */
+tracepoint:syscalls:sys_exit_recvfrom
+/comm == "open5gs-smfd"/
+/args->ret > 0/
+{
+    printf("{\"type\":\"m2_pfcp_recv\",\"ts_ns\":%llu,\"pid\":%d,\"tid\":%d,\"comm\":\"%s\",\"ret\":%d}\n",
+           nsecs, pid, tid, comm, (int32)args->ret);
+}
+
+/* M3 — N6 egress: decapsulated packet written to ogstun TUN */
+tracepoint:syscalls:sys_enter_write
+/pid == $UPF1_PID || pid == $UPF2_PID || pid == $UPF3_PID/
+{
+    $slice = pid == $UPF1_PID ? "eMBB" :
+             pid == $UPF2_PID ? "URLLC" : "mMTC";
+    printf("{\"type\":\"m3_n6_tx\",\"ts_ns\":%llu,\"cpu\":%d,\"len\":%d,\"netif\":\"%s\",\"pid\":%d}\n",
+           nsecs, cpu, (int32)args->count, $slice, pid);
+}
+
+/* M2 — N4 PFCP recv (unchanged) */
+tracepoint:syscalls:sys_exit_recvfrom
+/comm == "open5gs-upfd"/
+/args->ret > 0/
+{
+    printf("{\"type\":\"m2_pfcp_recv\",\"ts_ns\":%llu,\"pid\":%d,\"tid\":%d,\"comm\":\"%s\",\"ret\":%d}\n",
+           nsecs, pid, tid, comm, (int32)args->ret);
+}
+
+/* Heartbeat every 5s */
+interval:s:5
+{
+    printf("{\"type\":\"heartbeat\",\"ts_ns\":%llu,\"elapsed_s\":%llu}\n",
+           nsecs, elapsed / 1000000000);
+}

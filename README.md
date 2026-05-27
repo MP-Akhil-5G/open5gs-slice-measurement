@@ -4,7 +4,7 @@ A containerised three-slice 5G Core platform based on open5GS and UERANSIM with 
 
 ## Overview
 
-This repository provides a complete reproducible platform for measuring per-slice User Plane Function (UPF) forwarding delay and N4 PFCP session latency in a containerised 5G Core network. The platform implements three concurrent network slices — eMBB, URLLC, and mMTC — each served by a dedicated UPF instance, and instruments each UPF using TC-BPF programs attached to the correct network namespace via nsenter.
+This repository provides a complete reproducible platform for measuring per-slice User Plane Function (UPF) forwarding delay and N4 PFCP session latency in a containerised 5G Core network. The platform implements three concurrent network slices namely eMBB, URLLC, and mMTC, each served by a dedicated UPF instance, and instruments each UPF using TC-BPF programs attached to the correct network namespace via nsenter.
 
 The measurement framework was developed as part of a PhD research programme on intelligent, latency-aware UPF orchestration for MEC-integrated 5G Core networks at MNNIT Allahabad.
 

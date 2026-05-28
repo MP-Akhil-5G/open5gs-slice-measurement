@@ -120,8 +120,7 @@ Dataset files are licensed under **CC BY 4.0**. If you use this dataset in your 
 
 ```
 Akhil Dev Mishra and Mayank Pandey,
-"Characterising Per-Slice UPF Forwarding Delay in Containerised 5G Core Networks:
-A Kernel-Level Measurement Study,"
-[venue and year to be updated after publication]
-Department of CSE, MNNIT Allahabad, 2026.
+"Kernel-Level Per-Slice UPF Latency Measurement in Containerised 5G Core Networks,"
+arXiv:2605.28185 [cs.NI], May 2026.
+https://doi.org/10.48550/arXiv.2605.28185
 ```
